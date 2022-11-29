@@ -116,3 +116,80 @@ def todays_data(df_merged, boundary, home_teams, away_teams, today, games_dict_a
     df_merged = pd.concat([df_merged, today_df])
     
     return df_merged
+
+
+
+def cal_cols(df_merged):
+    
+    df_merged['fanPoints'] = data_explor.fan_points(df_merged)
+    df_merged['overPerform'] = data_explor.overperform(df_merged, 'fanPoints', 'playerId')
+    df_merged['overPerformDummy'] = data_explor.over_perf_dummy(df_merged, 'overPerform')
+    df_merged['unerPerformDummy'] = data_explor.under_perf_dummy(df_merged, 'overPerform')
+    df_merged['homeRoadPerf'] = data_explor.home_away_perf(df_merged, 'overPerform', ['playerId', 'homeRoad'])
+    
+    return df_merged
+
+
+
+def home_road_skate_split(df_merged):
+    
+    better_home_skater = list(np.where((df_merged['homeRoad'] == 'H') & (df_merged['homeRoadPerf'] > 0), df_merged['playerId'], None))
+    better_away_skater = list(np.where((df_merged['homeRoad'] == 'R') & (df_merged['homeRoadPerf'] > 0), df_merged['playerId'], None))
+    better_home_skater = [*set(better_home_skater)]
+    better_away_skater = [*set(better_away_skater)]
+    
+    df_merged['OpHomeDummy'] = np.where(df_merged['playerId'].isin(better_home_skater), 1, 0)
+    df_merged['OpAwayDummy'] = np.where(df_merged['playerId'].isin(better_away_skater), 1, 0)
+    
+    df_merged['OpNowhereDummy'] = np.where((df_merged['OpHomeDummy'] == 0) & (df_merged['OpRoadDummy'] == 0), 1, 0)
+    
+    
+
+def feature_creation(df_merged, feature_list, goals, shots):
+    for feature in feature_list:
+        df_merged[f'{feature}Ma7'] = data_proc.moving_average(df_merged, feature, 'playerId', 7)
+        df_merged[f'{feature}Ma7'] = df_merged[f'{feature}Ma7'].shift(1)
+    
+    for feature in feature_list:
+        df_merged[f'{feature}Ma3'] = data_proc.moving_average(df_merged, feature, 'playerId', 3)
+        df_merged[f'{feature}Ma3'] = df_merged[f'{feature}Ma3'].shift(1)
+    
+    for feature in feature_list:
+        df_merged[f'{feature}LastGame'] = df_merged[feature].shift(1)
+    
+    for feature in feature_list:
+        df_merged[f'{feature}Ma10'] = data_proc.moving_average(df_merged, feature, 'playerId', 10)
+        df_merged[f'{feature}Ma10'] = df_merged[f'{feature}Ma10'].shift(1)
+
+    for feature in feature_list:
+        df_merged[f'{feature}Ma14'] = data_proc.moving_average(df_merged, feature, 'playerId', 14)
+        df_merged[f'{feature}Ma14'] = df_merged[f'{feature}Ma14'].shift(1)
+    
+    for goal in goals:
+        df_merged[f"%{goal}"] = data_proc.percShotType(df_merged, 'playerId', goal, 'goals')
+
+    for shot in shots:
+        df_merged[f"%{shot}"] = data_proc.percShotType(df_merged, 'playerId', shot, 'shots')
+        
+    return df_merged
+
+
+
+def cleaning(drop_cols, impute_by_player, impute_by_perf, drop_cols2):
+    
+    df_merged = data_prep.remove_columns(df_merged, drop_cols)
+    
+    for col in impute_by_player:
+        data_prep.handle_missing(df_merged, 'playerId', col)
+        
+    for col in impute_by_perf:
+        
+        try:
+            data_prep.handle_missing(df_merged, 'overPerformDummy', col)
+        except:
+            continue
+            
+    df_merged = data_prep.remove_columns(df_merged, drop_cols2)
+    
+    return df_merged
+    
