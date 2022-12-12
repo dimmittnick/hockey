@@ -6,10 +6,10 @@ import requests
 import json
 from lxml import etree, html
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import RobustScaler, OneHotEncoder
 import joblib
 from datetime import *
-from dateutil import *
+from dateutil import relativedelta
 htmlparser = etree.HTMLParser()
 
 
@@ -335,12 +335,20 @@ def imputater(df, impute_by_player, impute_by_goalie, impute_by_team, player_col
 
 def dummy_variables(df, cat_vars):
     
-    for x in cat_vars:
-        df[f'{x}Copy'] = df[x].copy()
-    
-    df = pd.get_dummies(df, columns=cat_vars)
-    
-    return df
+    encoder = OneHotEncoder(handle_unknown='ignore', sparse=False)
+    encode_cols = pd.DataFrame(encoder.fit_transform(df[cat_vars]))
+    encode_cols.index = df.index
+    numer_df = df.drop(cat_vars, axis=1)
+    encode_df = pd.concat([numer_df, encode_cols], axis=1)
+
+    return encode_df
+
+def scaler(X):
+
+    scaler = RobustScaler()
+    X = scaler.fit_transform(X)
+
+    return X
 
 
 def splitting(df, today, date_col, hr_col, hr_perf_col):
@@ -379,15 +387,13 @@ def splitting(df, today, date_col, hr_col, hr_perf_col):
     return home_df_c_good, home_df_c_bad, home_df_d_good, home_df_d_bad, home_df_w_good, home_df_w_bad, road_df_c_good, road_df_c_bad, road_df_d_good, road_df_d_bad, road_df_w_good, road_df_w_bad
 
 
-def make_pred(df, features, target, model_path):
+def make_pred(X, model_path):
     
-    X = df[features].values
     model = joblib.load(model_path)
     
     predictions = model.predict(X)
-    df['predictions'] = predictions
     
-    return df
+    return predictions
     
     
 def main(save_pred=True):
@@ -578,13 +584,22 @@ def main(save_pred=True):
                           drop2='goalieId')
     
     
-    df_merged = dummy_variables(df=df_merged, cat_vars=['homeRoad', 'positionCode', 'shootsCatches'])
+    df_merged = dummy_variables(df=df_merged, cat_vars=['homeRoad', 'positionCode', 'opponentTeamAbbrev', 'teamAbbrevMerge'])
+    
+    df_merged.drop(['playerId', 'goals', 'assists',
+       'plusMinus', 'points', 'ppGoals', 'ppPoints', 'shGoals',
+       'shPoints', 'shootsCatches', 'shots', 'blockedShots',
+       'ppTimeOnIce', 'shTimeOnIce', 'shifts', 'timeOnIce',
+       'timeOnIcePerShift'], axis=1, inplace=True)
+    
+    #home_df_c_good, home_df_c_bad, home_df_d_good, home_df_d_bad, home_df_w_good, home_df_w_bad, road_df_c_good, road_df_c_bad, road_df_d_good, road_df_d_bad, road_df_w_good, road_df_w_bad = splitting(df=df_merged, today=today, date_col='gameDate', hr_col='homeRoadCopy', hr_perf_col='homeRoadPerf')
     
     
-    home_df_c_good, home_df_c_bad, home_df_d_good, home_df_d_bad, home_df_w_good, home_df_w_bad, road_df_c_good, road_df_c_bad, road_df_d_good, road_df_d_bad, road_df_w_good, road_df_w_bad = splitting(df=df_merged, today=today, date_col='gameDate', hr_col='homeRoadCopy', hr_perf_col='homeRoadPerf')
-    
-    
-    features = ['assistsMa7', 'goalsMa7', 'plusMinusMa7', 'pointsMa7',
+    features = ['savePctLastGame', 'savePctMa3', 'savePctMa7',
+       'savePctMa16', 'goalsAgainstLastGame', 'goalsAgainstMa3',
+       'goalsAgainstMa7', 'goalsAgainstMa16', 'shotsAgainstPerGameLastGame',
+       'shotsAgainstPerGameMa3', 'shotsAgainstPerGameMa7', 'shotsAgainstPerGameMa16', 'homeRoadPerf', 'OpHomeDummy', 'OpRoadDummy',
+       'OpNowhereDummy','assistsMa7', 'goalsMa7', 'plusMinusMa7', 'pointsMa7',
        'ppPointsMa7', 'fanPointsMa7', 'blockedShotsMa7', 'shootingPctMa7',
        'shotsMa7', 'timeOnIceMa7', 'ppTimeOnIceMa7', 'shiftsMa7',
        'timeOnIcePerShiftMa7', 'assistsMa3', 'goalsMa3', 'plusMinusMa3',
@@ -598,33 +613,22 @@ def main(save_pred=True):
        'goalsMa16', 'plusMinusMa16', 'pointsMa16', 'ppPointsMa16',
        'fanPointsMa16', 'blockedShotsMa16', 'shootingPctMa16', 'shotsMa16',
        'timeOnIceMa16', 'ppTimeOnIceMa16', 'shiftsMa16',
-       'timeOnIcePerShiftMa16', 'savePctLastGame', 'savePctMa3', 'savePctMa7', 'savePctMa16', 'goalsAgainstLastGame', 'goalsAgainstMa3',
-       'goalsAgainstMa7', 'goalsAgainstMa16', 'shotsAgainstPerGameLastGame',
-       'shotsAgainstPerGameMa3', 'shotsAgainstPerGameMa7', 'shotsAgainstPerGameMa16', 'homeRoad_H']
+       'timeOnIcePerShiftMa16', 'avgFanPoints', 0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73]
     
     target = 'fanPoints'
     
+    predictable_df = df_merged[df_merged['gameDate'] == today]
     
-    home_df_c_good = make_pred(df=home_df_c_good, features=features, target=target, model_path='/Users/nickdimmitt/hockey/models/home_df_c_good.pkl')
-    home_df_c_bad = make_pred(df=home_df_c_bad, features=features, target=target, model_path='/Users/nickdimmitt/hockey/models/home_df_c_bad.pkl')
-    home_df_w_good = make_pred(df=home_df_w_good, features=features, target=target, model_path='/Users/nickdimmitt/hockey/models/home_df_w_good.pkl')
-    home_df_w_bad = make_pred(df=home_df_w_bad, features=features, target=target, model_path='/Users/nickdimmitt/hockey/models/home_df_w_bad.pkl')
-    home_df_d_good = make_pred(df=home_df_d_good, features=features, target=target, model_path='/Users/nickdimmitt/hockey/models/home_df_d_good.pkl')
-    home_df_d_bad = make_pred(df=home_df_d_bad, features=features, target=target, model_path='/Users/nickdimmitt/hockey/models/home_df_d_bad.pkl')
-    
-    road_df_c_good = make_pred(df=road_df_c_good, features=features, target=target, model_path='/Users/nickdimmitt/hockey/models/road_df_c_good.pkl')
-    road_df_c_bad = make_pred(df=road_df_c_bad, features=features, target=target, model_path='/Users/nickdimmitt/hockey/models/road_df_c_bad.pkl')
-    road_df_w_good = make_pred(df=road_df_w_good, features=features, target=target, model_path='/Users/nickdimmitt/hockey/models/road_df_w_good.pkl')
-    road_df_w_bad = make_pred(df=road_df_w_bad, features=features, target=target, model_path='/Users/nickdimmitt/hockey/models/road_df_w_bad.pkl')
-    road_df_d_good = make_pred(df=road_df_d_good, features=features, target=target, model_path='/Users/nickdimmitt/hockey/models/road_df_d_good.pkl')
-    road_df_d_bad = make_pred(df=road_df_d_bad, features=features, target=target, model_path='/Users/nickdimmitt/hockey/models/road_df_d_bad.pkl')
-    
-    all_pred_df = pd.concat([home_df_d_good, home_df_d_bad, home_df_c_good, home_df_c_bad, home_df_w_good, home_df_w_bad, road_df_d_good, road_df_d_bad, road_df_c_good, road_df_c_bad, road_df_w_good, road_df_w_bad])
-    
-    final_pred = all_pred_df[['skaterFullName', 'positionCodeCopy', 'teamAbbrevMerge', 'positionCodeCopy', 'predictions']].sort_values(by='predictions', ascending=False)
+    X = predictable_df[features].values
+    X = scaler(X)
+
+    predictable_df['predictions'] = make_pred(X, '/Users/nickdimmitt/hockey/old_work/training/ohmodel2020_scaled.pkl')    
+    final_pred = [['skaterFullName', 'positionCodeCopy', 'teamAbbrevMerge', 'predictions']].sort_values(by='predictions', ascending=False)
     
     path='/Users/nickdimmitt/hockey/predictions/pred'
     
     if save_pred:
         final_pred.to_csv(f'{path}_{today}.csv')
-    
+        
+if __name__=='__main__':
+    main()
